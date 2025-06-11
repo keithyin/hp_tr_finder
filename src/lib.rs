@@ -1,4 +1,4 @@
-use intervaltree;
+pub use intervaltree;
 use regex::Regex;
 use std::{
     collections::HashMap,
