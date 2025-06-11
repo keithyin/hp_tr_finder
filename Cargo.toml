@@ -2,6 +2,10 @@
 name = "hp_tr_finder"
 version = "0.1.0"
 edition = "2024"
+description = "minimap2 frontend"
+license = "MIT"
+repository ="https://github.com/keithyin/hp_tr_finder"
+
 
 [dependencies]
 regex = "1"
