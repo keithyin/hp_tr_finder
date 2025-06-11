@@ -1,10 +1,7 @@
 pub use intervaltree;
 use regex::Regex;
 use std::{
-    collections::HashMap,
-    hash::Hash,
-    ops::{Deref, DerefMut},
-    rc::Rc,
+    borrow::Borrow, collections::HashMap, hash::Hash, ops::{Deref, DerefMut}
 };
 
 static BASES: [u8; 4] = ['A' as u8, 'C' as u8, 'G' as u8, 'T' as u8];
@@ -76,14 +73,17 @@ fn generate_motif_core(
     }
 }
 
-#[derive(Debug, Default)]
-pub struct Region2Motif {
+#[derive(Debug)]
+pub struct Region2Motif<T> {
     // (usize, usize) -> (start, end)
-    value: HashMap<(usize, usize), Rc<String>>,
+    value: HashMap<(usize, usize), T>,
 }
 
-impl Region2Motif {
-    pub fn to_interval_search_tree(&self) -> intervaltree::IntervalTree<usize, Rc<String>> {
+impl<T> Region2Motif<T>
+where
+    T: Clone,
+{
+    pub fn to_interval_search_tree(&self) -> intervaltree::IntervalTree<usize, T> {
         intervaltree::IntervalTree::from_iter(
             self.value
                 .iter()
@@ -92,25 +92,41 @@ impl Region2Motif {
     }
 }
 
-impl Deref for Region2Motif {
-    type Target = HashMap<(usize, usize), Rc<String>>;
+impl<T> Default for Region2Motif<T> {
+    fn default() -> Self {
+        Self {
+            value: HashMap::new(),
+        }
+    }
+}
+
+impl<T> Deref for Region2Motif<T>
+where
+    T: Sized,
+{
+    type Target = HashMap<(usize, usize), T>;
     fn deref(&self) -> &Self::Target {
         &self.value
     }
 }
-impl DerefMut for Region2Motif {
+impl<T> DerefMut for Region2Motif<T>
+where
+    T: Sized,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.value
     }
 }
 
-pub fn all_seq_hp_tr_finder<SeqK, SeqV>(
-    all_regs: &Vec<HashMap<String, Regex>>,
+pub fn all_seq_hp_tr_finder<RegK, SeqK, SeqV, MotifT>(
+    all_regs: &Vec<HashMap<RegK, Regex>>,
     seqs: &HashMap<SeqK, SeqV>,
-) -> HashMap<SeqK, Region2Motif>
+) -> HashMap<SeqK, Region2Motif<MotifT>>
 where
+    RegK: std::borrow::Borrow<str>,
     SeqK: Clone + Eq + Hash,
     SeqV: std::borrow::Borrow<str>,
+    MotifT: From<String> + Clone + Borrow<String>,
 {
     let mut match_patterns = HashMap::new();
 
@@ -123,11 +139,15 @@ where
         .collect()
 }
 
-pub fn single_seq_hp_tr_finder(
-    all_regs: &Vec<HashMap<String, Regex>>,
-    match_patterns: &mut HashMap<String, Rc<String>>,
+pub fn single_seq_hp_tr_finder<RegK, MotifT>(
+    all_regs: &Vec<HashMap<RegK, Regex>>,
+    match_patterns: &mut HashMap<String, MotifT>,
     seq: &str,
-) -> Region2Motif {
+) -> Region2Motif<MotifT>
+where
+    RegK: std::borrow::Borrow<str>,
+    MotifT: From<String> + Clone + Borrow<String>,
+{
     let mut region2motif = Region2Motif::default();
     all_regs.iter().for_each(|regs| {
         hp_tr_finder(regs, seq, &mut region2motif, match_patterns);
@@ -136,19 +156,22 @@ pub fn single_seq_hp_tr_finder(
     region2motif
 }
 
-pub fn hp_tr_finder(
-    regs: &HashMap<String, Regex>,
+pub fn hp_tr_finder<RegK, Pat>(
+    regs: &HashMap<RegK, Regex>,
     seq: &str,
-    region2motif: &mut Region2Motif,
-    match_patterns: &mut HashMap<String, Rc<String>>,
-) {
+    region2motif: &mut Region2Motif<Pat>,
+    match_patterns: &mut HashMap<String, Pat>,
+) where
+    RegK: std::borrow::Borrow<str>,
+    Pat: From<String> + Clone,
+{
     for (motif, reg) in regs {
         for m in reg.find_iter(&seq) {
             let (s, e) = (m.start(), m.end());
-            let match_pat = format!("({}){}", motif, (e - s) / motif.len());
+            let match_pat = format!("({}){}", motif.borrow(), (e - s) / motif.borrow().len());
             if !match_patterns.contains_key(&match_pat) {
                 let m_pat_ = match_pat.clone();
-                match_patterns.insert(m_pat_, Rc::new(match_pat.clone()));
+                match_patterns.insert(m_pat_, match_pat.clone().into());
             }
             let start_end = (m.start(), m.end());
             assert!(
@@ -169,7 +192,7 @@ pub fn hp_tr_finder(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::Arc};
 
     use crate::{UnitAndRepeats, all_seq_hp_tr_finder, generate_motifs};
 
@@ -214,7 +237,8 @@ mod tests {
         let mut seqs = HashMap::new();
         seqs.insert("seq1".to_string(), "ACGTACGTAAACGT".to_string());
         seqs.insert("seq2".to_string(), "ACACACCCGCGCG".to_string());
-        let res = all_seq_hp_tr_finder(&all_regs, &seqs);
+        let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
+            all_seq_hp_tr_finder(&all_regs, &seqs);
         println!("{res:?}");
     }
 }
