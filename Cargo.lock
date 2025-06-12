@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "hp_tr_finder"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "intervaltree",
  "regex",

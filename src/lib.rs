@@ -138,9 +138,9 @@ pub fn all_seq_hp_tr_finder<RegK, SeqK, SeqV, MotifT>(
     seqs: &HashMap<SeqK, SeqV>,
 ) -> HashMap<SeqK, Region2Motif<MotifT>>
 where
-    RegK: std::borrow::Borrow<str>,
+    RegK: std::borrow::Borrow<String>,
     SeqK: Clone + Eq + Hash,
-    SeqV: std::borrow::Borrow<str>,
+    SeqV: std::borrow::Borrow<String>,
     MotifT: From<String> + Clone + Borrow<String> + Debug,
 {
     let mut match_patterns = HashMap::new();
@@ -160,7 +160,7 @@ pub fn single_seq_hp_tr_finder<RegK, MotifT>(
     seq: &str,
 ) -> Region2Motif<MotifT>
 where
-    RegK: std::borrow::Borrow<str>,
+    RegK: std::borrow::Borrow<String>,
     MotifT: From<String> + Clone + Borrow<String> + Debug,
 {
     let mut region2motif = Region2Motif::default();
@@ -177,7 +177,7 @@ pub fn hp_tr_finder<RegK, Pat>(
     region2motif: &mut Region2Motif<Pat>,
     match_patterns: &mut HashMap<String, Pat>,
 ) where
-    RegK: std::borrow::Borrow<str>,
+    RegK: std::borrow::Borrow<String>,
     Pat: From<String> + Clone + Debug,
 {
     for (motif, reg) in regs {
