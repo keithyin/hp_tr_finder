@@ -1,10 +1,7 @@
 pub use intervaltree;
 use regex::Regex;
 use std::{
-    borrow::Borrow,
-    collections::HashMap,
-    hash::Hash,
-    ops::{Deref, DerefMut},
+    borrow::Borrow, collections::HashMap, fmt::Debug, hash::Hash, ops::{Deref, DerefMut}
 };
 
 static BASES: [u8; 4] = ['A' as u8, 'C' as u8, 'G' as u8, 'T' as u8];
@@ -144,7 +141,7 @@ where
     RegK: std::borrow::Borrow<str>,
     SeqK: Clone + Eq + Hash,
     SeqV: std::borrow::Borrow<str>,
-    MotifT: From<String> + Clone + Borrow<String>,
+    MotifT: From<String> + Clone + Borrow<String> + Debug,
 {
     let mut match_patterns = HashMap::new();
 
@@ -164,7 +161,7 @@ pub fn single_seq_hp_tr_finder<RegK, MotifT>(
 ) -> Region2Motif<MotifT>
 where
     RegK: std::borrow::Borrow<str>,
-    MotifT: From<String> + Clone + Borrow<String>,
+    MotifT: From<String> + Clone + Borrow<String> + Debug,
 {
     let mut region2motif = Region2Motif::default();
     all_regs.iter().for_each(|regs| {
@@ -181,7 +178,7 @@ pub fn hp_tr_finder<RegK, Pat>(
     match_patterns: &mut HashMap<String, Pat>,
 ) where
     RegK: std::borrow::Borrow<str>,
-    Pat: From<String> + Clone,
+    Pat: From<String> + Clone + Debug,
 {
     for (motif, reg) in regs {
         for m in reg.find_iter(&seq) {
@@ -194,8 +191,8 @@ pub fn hp_tr_finder<RegK, Pat>(
             let start_end = (m.start(), m.end());
             assert!(
                 !region2motif.contains_key(&start_end),
-                "duplicated start,end. {:?}",
-                start_end
+                "duplicated start,end. {:?}, exists_pat: {:?}, new_pat:{}",
+                start_end, region2motif.get(&start_end).unwrap(), match_pat
             );
 
             region2motif.insert(
