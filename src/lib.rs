@@ -189,11 +189,16 @@ pub fn hp_tr_finder<RegK, Pat>(
                 match_patterns.insert(m_pat_, match_pat.clone().into());
             }
             let start_end = (m.start(), m.end());
-            assert!(
-                !region2motif.contains_key(&start_end),
-                "duplicated start,end. {:?}, exists_pat: {:?}, new_pat:{}",
-                start_end, region2motif.get(&start_end).unwrap(), match_pat
-            );
+
+            // 
+            if region2motif.contains_key(&start_end) {
+                continue;
+            }
+            // assert!(
+            //     !region2motif.contains_key(&start_end),
+            //     "duplicated start,end. {:?}, exists_pat: {:?}, new_pat:{}",
+            //     start_end, region2motif.get(&start_end).unwrap(), match_pat
+            // );
 
             region2motif.insert(
                 (m.start(), m.end()),
