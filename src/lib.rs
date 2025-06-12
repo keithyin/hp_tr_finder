@@ -1,7 +1,10 @@
 pub use intervaltree;
 use regex::Regex;
 use std::{
-    borrow::Borrow, collections::HashMap, hash::Hash, ops::{Deref, DerefMut}
+    borrow::Borrow,
+    collections::HashMap,
+    hash::Hash,
+    ops::{Deref, DerefMut},
 };
 
 static BASES: [u8; 4] = ['A' as u8, 'C' as u8, 'G' as u8, 'T' as u8];
@@ -89,6 +92,21 @@ where
                 .iter()
                 .map(|(key, value)| (key.0..key.1, value.clone())),
         )
+    }
+
+    pub fn flatten(&self) -> HashMap<usize, Vec<((usize, usize), T)>> {
+        let mut result = HashMap::new();
+
+        self.value.iter().for_each(|(key, value)| {
+            (key.0..key.1).into_iter().for_each(|pos| {
+                result
+                    .entry(pos)
+                    .or_insert(vec![])
+                    .push(((key.0, key.1), value.clone()));
+            });
+        });
+
+        result
     }
 }
 
@@ -240,5 +258,11 @@ mod tests {
         let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
             all_seq_hp_tr_finder(&all_regs, &seqs);
         println!("{res:?}");
+
+        res.iter().for_each(|(_key, value)| {
+            let mut result = value.flatten().into_iter().collect::<Vec<_>>();
+            result.sort_by_key(|v| v.0);
+            println!("{:?}", result);
+        });
     }
 }
