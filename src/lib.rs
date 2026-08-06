@@ -1,7 +1,12 @@
 pub use intervaltree;
 use regex::Regex;
 use std::{
-    borrow::Borrow, collections::HashMap, fmt::Debug, hash::Hash, ops::{Deref, DerefMut}
+    borrow::Borrow,
+    cmp::Reverse,
+    collections::{BTreeSet, HashMap},
+    fmt::Debug,
+    hash::Hash,
+    ops::{Deref, DerefMut},
 };
 
 static BASES: [u8; 4] = ['A' as u8, 'C' as u8, 'G' as u8, 'T' as u8];
@@ -168,7 +173,48 @@ where
         hp_tr_finder(regs, seq, &mut region2motif, match_patterns);
     });
 
-    region2motif
+    dedup_overlaps(region2motif)
+}
+
+/// Keep only non-overlapping annotations, longest-span first (ties: smaller
+/// unit, then leftmost start). A TR region admits several period
+/// representations (e.g. a 46 bp pure-AT run is both `(AT)23` and `(ATAT)11`);
+/// we keep the single canonical one, discarding the rest entirely.
+fn dedup_overlaps<Pat>(region2motif: Region2Motif<Pat>) -> Region2Motif<Pat>
+where
+    Pat: From<String> + Clone + Borrow<String>,
+{
+    let mut matches: Vec<_> = region2motif
+        .value
+        .into_iter()
+        .map(|((start, end), pat)| {
+            // pat is `(motif)N`; DNA motifs never contain parentheses.
+            let motif: &String = pat.borrow();
+            let motif = &motif[motif.find('(').unwrap() + 1..motif.rfind(')').unwrap()];
+            (start, end, motif.len(), pat)
+        })
+        .collect();
+
+    // span desc, unit asc, start asc — a strict total order, so the output is
+    // fully deterministic regardless of the HashMap's iteration order.
+    matches.sort_by_key(|(start, end, unit, _)| (Reverse(end - start), *unit, *start));
+
+    let mut accepted = BTreeSet::new();
+    let mut result = Region2Motif::default();
+    for (start, end, _, pat) in matches {
+        // Accepted intervals are mutually non-overlapping, so checking only the
+        // rightmost accepted interval with start < end is complete.
+        let overlaps = accepted
+            .range(..(end, usize::MAX))
+            .next_back()
+            .is_some_and(|&(_, s_other_end)| s_other_end > start);
+        if !overlaps {
+            accepted.insert((start, end));
+            result.insert((start, end), pat);
+        }
+    }
+
+    result
 }
 
 pub fn hp_tr_finder<RegK, Pat>(
@@ -190,7 +236,7 @@ pub fn hp_tr_finder<RegK, Pat>(
             }
             let start_end = (m.start(), m.end());
 
-            // 
+            //
             if region2motif.contains_key(&start_end) {
                 continue;
             }
@@ -266,5 +312,40 @@ mod tests {
             result.sort_by_key(|v| v.0);
             println!("{:?}", result);
         });
+    }
+
+    #[test]
+    fn test_dedup_overlaps_canonical_annotation() {
+        let all_regs = vec![
+            UnitAndRepeats::new(1, 3).build_finder_regrex(),
+            UnitAndRepeats::new(2, 3).build_finder_regrex(),
+            UnitAndRepeats::new(3, 3).build_finder_regrex(),
+            UnitAndRepeats::new(4, 3).build_finder_regrex(),
+        ];
+
+        // A 46 bp pure-AT run is also (ATAT)11 [0,44), (TATA)11 [2,46),
+        // (TA)22 [1,45), (ATA)15 [0,45); the longest annotation (AT)23 [0,46)
+        // overlaps and discards all of them.
+        let mut seqs = HashMap::new();
+        seqs.insert("pure_at".to_string(), "AT".repeat(23));
+        let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
+            all_seq_hp_tr_finder(&all_regs, &seqs);
+        let regions = res.get("pure_at").unwrap();
+        assert_eq!(
+            regions.value.clone(),
+            HashMap::from([((0usize, 46usize), Arc::new("(AT)23".to_string()))])
+        );
+
+        // A 13 bp alternating run is both (TA)6 [0,12) and (AT)6 [1,13);
+        // same span and unit, so the leftmost start wins.
+        let mut seqs = HashMap::new();
+        seqs.insert("alt".to_string(), "TATATATATATAT".to_string());
+        let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
+            all_seq_hp_tr_finder(&all_regs, &seqs);
+        let regions = res.get("alt").unwrap();
+        assert_eq!(
+            regions.value.clone(),
+            HashMap::from([((0usize, 12usize), Arc::new("(TA)6".to_string()))])
+        );
     }
 }
