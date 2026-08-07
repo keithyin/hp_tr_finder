@@ -10,3 +10,4 @@ repository ="https://github.com/keithyin/hp_tr_finder"
 [dependencies]
 regex = "1"
 intervaltree = "0.2.7"
+clap = { version = "4.6.6", features = ["derive"] }
