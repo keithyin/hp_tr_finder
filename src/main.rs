@@ -194,3 +194,117 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{build_finder_regs, Cli, Scenario};
+    use clap::Parser;
+
+    /// Construct a Cli from an argv slice (program name + args).
+    fn cli_from(args: &[&str]) -> Cli {
+        Cli::parse_from(std::iter::once("hp_tr_finder").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn unit_mode_builds_one_regex_map_per_unit() {
+        let cli = cli_from(&[
+            "ref", "t.fa", "--unitAndRepeats", "1-3,2-2",
+        ]);
+        let regs = build_finder_regs(&cli).unwrap();
+        assert_eq!(regs.len(), 2);
+
+        // unit 1: homopolymer motifs only, min repeats 3.
+        let unit1 = &regs[0];
+        assert_eq!(
+            unit1.keys().cloned().collect::<std::collections::BTreeSet<_>>(),
+            ["A", "C", "G", "T"].into_iter().map(str::to_string).collect()
+        );
+        let a3 = &unit1["A"];
+        assert_eq!(a3.as_str(), "(A){3,}");
+        assert!(a3.is_match("AAAA"));
+        assert!(!a3.is_match("AA"));
+
+        // unit 2: all non-degenerate dinucleotide motifs, min repeats 2.
+        let unit2 = &regs[1];
+        assert_eq!(unit2.len(), 12);
+        let ac2 = &unit2["AC"];
+        assert_eq!(ac2.as_str(), "(AC){2,}");
+        assert!(ac2.is_match("ACAC"));
+        assert!(!ac2.is_match("AC"));
+    }
+
+    #[test]
+    fn motif_mode_builds_a_single_map_from_explicit_motifs() {
+        let cli = cli_from(&[
+            "ref", "t.fa", "--motifAndRepeats", "A-2,AT-2",
+        ]);
+        let regs = build_finder_regs(&cli).unwrap();
+        assert_eq!(regs.len(), 1);
+
+        let map = &regs[0];
+        assert_eq!(map.len(), 2);
+        let at2 = &map["AT"];
+        assert_eq!(at2.as_str(), "(AT){2,}");
+        assert!(at2.is_match("ATATAT"));
+        assert!(!at2.is_match("AT"));
+    }
+
+    #[test]
+    fn missing_spec_is_an_error() {
+        let cli = cli_from(&["ref", "t.fa"]);
+        let err = build_finder_regs(&cli).unwrap_err();
+        assert!(err.contains("must specify"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn both_specs_conflict_at_clap_level() {
+        let args = [
+            "hp_tr_finder", "ref", "t.fa", "--unitAndRepeats", "1-2", "--motifAndRepeats", "A-2",
+        ];
+        let Err(err) = Cli::try_parse_from(args) else {
+            panic!("expected a clap conflict error");
+        };
+        // clap group="spec": the two options cannot be used together.
+        assert!(err.to_string().contains("cannot be used with"));
+    }
+
+    #[test]
+    fn invalid_unit_spec_items_are_rejected() {
+        // malformed item: no '-'
+        let cli = cli_from(&["ref", "t.fa", "--unitAndRepeats", "1-2,zz"]);
+        let err = build_finder_regs(&cli).unwrap_err();
+        assert!(err.contains("expected N-N"), "unexpected error: {err}");
+
+        // non-numeric min repeats
+        let cli = cli_from(&["ref", "t.fa", "--unitAndRepeats", "1-x"]);
+        let err = build_finder_regs(&cli).unwrap_err();
+        assert!(err.contains("invalid min repeats"), "unexpected error: {err}");
+
+        // zero unit size
+        let cli = cli_from(&["ref", "t.fa", "--unitAndRepeats", "0-2"]);
+        let err = build_finder_regs(&cli).unwrap_err();
+        assert!(err.contains("unit size must be >= 1"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn invalid_motif_spec_items_are_rejected() {
+        // malformed item: no '-'
+        let cli = cli_from(&["ref", "t.fa", "--motifAndRepeats", "A2"]);
+        let err = build_finder_regs(&cli).unwrap_err();
+        assert!(err.contains("invalid motif-repeats spec"), "unexpected error: {err}");
+
+        // motif that yields an invalid regex: '[' alone is an unclosed class.
+        let cli = cli_from(&["ref", "t.fa", "--motifAndRepeats", "[-2"]);
+        let err = build_finder_regs(&cli).unwrap_err();
+        assert!(err.contains("invalid regex"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn scenario_value_enum_parses() {
+        assert!(matches!(cli_from(&["ref", "t.fa"]).scenario, Scenario::Ref));
+        assert!(matches!(
+            cli_from(&["called", "t.fa"]).scenario,
+            Scenario::Called
+        ));
+    }
+}
