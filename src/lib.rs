@@ -3,7 +3,7 @@ use regex::Regex;
 use std::{
     borrow::Borrow,
     cmp::Reverse,
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
     fmt::Debug,
     hash::Hash,
     ops::{Deref, DerefMut},
@@ -199,17 +199,22 @@ where
     // fully deterministic regardless of the HashMap's iteration order.
     matches.sort_by_key(|(start, end, unit, _)| (Reverse(end - start), *unit, *start));
 
-    let mut accepted = BTreeSet::new();
+    // `start -> end` of the intervals accepted so far. Mutually non-overlapping,
+    // so the starts are unique and the ends come out in the same order.
+    let mut accepted: BTreeMap<usize, usize> = BTreeMap::new();
     let mut result = Region2Motif::default();
     for (start, end, _, pat) in matches {
-        // Accepted intervals are mutually non-overlapping, so checking only the
-        // rightmost accepted interval with start < end is complete.
+        // Intervals are half-open, so one starting exactly at `end` merely
+        // touches this candidate and cannot overlap it: bound the lookup by
+        // start alone, exclusively. Accepted intervals are non-overlapping, so
+        // of those the greatest start also has the greatest end — checking only
+        // it is complete.
         let overlaps = accepted
-            .range(..(end, usize::MAX))
+            .range(..end)
             .next_back()
-            .is_some_and(|&(_, s_other_end)| s_other_end > start);
+            .is_some_and(|(_, &other_end)| other_end > start);
         if !overlaps {
-            accepted.insert((start, end));
+            accepted.insert(start, end);
             result.insert((start, end), pat);
         }
     }
@@ -260,7 +265,9 @@ pub fn hp_tr_finder<RegK, Pat>(
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use crate::{UnitAndRepeats, all_seq_hp_tr_finder, generate_motifs};
+    use crate::{
+        Region2Motif, UnitAndRepeats, all_seq_hp_tr_finder, dedup_overlaps, generate_motifs,
+    };
 
     #[test]
     fn test_generate_motifs() {
@@ -346,6 +353,103 @@ mod tests {
         assert_eq!(
             regions.value.clone(),
             HashMap::from([((0usize, 12usize), Arc::new("(TA)6".to_string()))])
+        );
+    }
+
+    /// Feeds `dedup_overlaps` a set of hand-built annotations and returns what
+    /// survived, sorted by start, so a test can spell out exactly which regions
+    /// are kept. Patterns are `(motif)N` as the real finder emits them, with the
+    /// copy count matching the span.
+    fn dedup_keep(entries: &[((usize, usize), &str)]) -> Vec<(usize, usize, String)> {
+        let mut input: Region2Motif<Arc<String>> = Region2Motif::default();
+        for ((start, end), pattern) in entries {
+            input.insert((*start, *end), Arc::new(pattern.to_string()));
+        }
+
+        let mut kept: Vec<_> = dedup_overlaps(input)
+            .value
+            .into_iter()
+            .map(|((start, end), pattern)| (start, end, pattern.to_string()))
+            .collect();
+        kept.sort();
+        kept
+    }
+
+    #[test]
+    fn test_touching_annotations_are_not_overlaps() {
+        // Intervals are half-open: [0,6) and [6,16) share no base, so both must
+        // survive. The long run is accepted first in both input orders (sorted
+        // by span), and used to reject its left neighbour for starting exactly
+        // where that neighbour ended.
+        let both = vec![(0, 6, "(A)6".to_string()), (6, 16, "(C)10".to_string())];
+        assert_eq!(dedup_keep(&[((0, 6), "(A)6"), ((6, 16), "(C)10")]), both);
+        assert_eq!(dedup_keep(&[((6, 16), "(C)10"), ((0, 6), "(A)6")]), both);
+
+        // A chain of mutually touching runs — each one abuts an already-accepted
+        // neighbour with a larger span.
+        assert_eq!(
+            dedup_keep(&[((0, 10), "(A)10"), ((10, 25), "(C)15"), ((25, 35), "(G)10"),]),
+            vec![
+                (0, 10, "(A)10".to_string()),
+                (10, 25, "(C)15".to_string()),
+                (25, 35, "(G)10".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_real_overlaps_are_still_dropped() {
+        // The touching-neighbour exemption must not blind the check to a
+        // genuine overlap further left: [10,20) overlaps accepted [0,12) even
+        // though [20,31) — a larger key — only touches it at 20.
+        assert_eq!(
+            dedup_keep(&[((0, 12), "(AT)6"), ((20, 31), "(C)11"), ((10, 20), "(AC)5")]),
+            vec![(0, 12, "(AT)6".to_string()), (20, 31, "(C)11".to_string())]
+        );
+
+        // Nested and partial overlaps still lose to the longest span.
+        assert_eq!(
+            dedup_keep(&[
+                ((0, 16), "(AT)8"),
+                ((0, 6), "(AT)3"),
+                ((5, 15), "(TA)5"),
+                ((4, 12), "(ATAT)2"),
+            ]),
+            vec![(0, 16, "(AT)8".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_adjacent_trs_survive_the_full_pipeline() {
+        let all_regs = vec![
+            UnitAndRepeats::new(1, 3).build_finder_regrex(),
+            UnitAndRepeats::new(2, 3).build_finder_regrex(),
+            UnitAndRepeats::new(3, 3).build_finder_regrex(),
+            UnitAndRepeats::new(4, 3).build_finder_regrex(),
+        ];
+
+        // Three homopolymer runs with no filler between them: (A)6|(C)10|(T)5.
+        let mut seqs = HashMap::new();
+        seqs.insert(
+            "abutting_runs".to_string(),
+            format!("{}{}{}", "A".repeat(6), "C".repeat(10), "T".repeat(5)),
+        );
+        let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
+            all_seq_hp_tr_finder(&all_regs, &seqs);
+
+        let mut kept: Vec<_> = res["abutting_runs"]
+            .value
+            .iter()
+            .map(|((start, end), pattern)| (*start, *end, pattern.to_string()))
+            .collect();
+        kept.sort();
+        assert_eq!(
+            kept,
+            vec![
+                (0, 6, "(A)6".to_string()),
+                (6, 16, "(C)10".to_string()),
+                (16, 21, "(T)5".to_string()),
+            ]
         );
     }
 }
