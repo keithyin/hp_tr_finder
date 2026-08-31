@@ -3,7 +3,26 @@
     "allow": [
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(cp src/lib.rs /tmp/lib.rs.bak)",
+      "Read(//tmp/**)",
+      "Bash(cargo run *)",
+      "Bash(cargo build *)",
+      "Bash(printf '>s\\\\nAAAAAAAAAA\\\\n')",
+      "Bash(cargo clippy *)",
+      "Bash(git checkout *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(cp src/lib.rs *)",
+      "Bash(cargo fmt *)",
+      "Bash(rustfmt --edition 2024 src/lib.rs)",
+      "Bash(git --no-pager diff Cargo.toml Cargo.lock)",
+      "Bash(git --no-pager diff --stat)",
+      "Bash(git --no-pager log --oneline --graph -8)",
+      "Bash(git rev-list *)",
+      "Bash(git commit *)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }
