@@ -154,6 +154,7 @@ where
 pub fn all_seq_hp_tr_finder<RegK, SeqK, SeqV, MotifT>(
     all_regs: &Vec<HashMap<RegK, Regex>>,
     seqs: &HashMap<SeqK, SeqV>,
+    dedup_nested: bool,
 ) -> HashMap<SeqK, Region2Motif<MotifT>>
 where
     RegK: std::borrow::Borrow<String>,
@@ -165,7 +166,12 @@ where
 
     seqs.iter()
         .map(|(seq_name, seq)| {
-            let region2motif = single_seq_hp_tr_finder(all_regs, &mut match_patterns, seq.borrow());
+            let region2motif = single_seq_hp_tr_finder(
+                all_regs,
+                &mut match_patterns,
+                seq.borrow(),
+                dedup_nested,
+            );
 
             (seq_name.clone(), region2motif)
         })
@@ -176,6 +182,7 @@ pub fn single_seq_hp_tr_finder<RegK, MotifT>(
     all_regs: &Vec<HashMap<RegK, Regex>>,
     match_patterns: &mut HashMap<String, MotifT>,
     seq: &str,
+    dedup_nested: bool,
 ) -> Region2Motif<MotifT>
 where
     RegK: std::borrow::Borrow<String>,
@@ -186,7 +193,17 @@ where
         hp_tr_finder(regs, seq, &mut region2motif, match_patterns);
     });
 
-    dedup_rotation_hits(region2motif)
+    let deduped = dedup_rotation_hits(region2motif);
+    if dedup_nested {
+        dedup_nested_hits(deduped)
+    } else {
+        deduped
+    }
+}
+
+/// `(motif)N` 中的 motif 部分；DNA motif 不含括号。
+fn pattern_motif(pat: &str) -> &str {
+    &pat[pat.find('(').unwrap() + 1..pat.rfind(')').unwrap()]
 }
 
 /// tr-finder v2 旋转冗余去重：同周期 p 内，起点错位量 shift ∈ [0, p-1] 的命中
@@ -213,10 +230,8 @@ where
         .value
         .into_iter()
         .map(|((start, end), pat)| {
-            // pat 是 `(motif)N`；DNA motif 不含括号，period = motif 长度。
-            let pat_str: &String = pat.borrow();
-            let motif = &pat_str[pat_str.find('(').unwrap() + 1..pat_str.rfind(')').unwrap()];
-            (start, end, motif.len(), pat)
+            let period = pattern_motif(pat.borrow()).len();
+            (start, end, period, pat)
         })
         .collect();
 
@@ -238,6 +253,69 @@ where
         result.insert((start, end), pat);
     }
 
+    result
+}
+
+/// 嵌套冗余去重：外层命中完全包含内层命中时，按拷贝数 copies = (end-start)/period
+/// 裁决——内层 copies > 外层 → 仅保留内层（删外层）；内层 copies ≤ 外层 →
+/// 保留外层（删内层）。典型场景：unit-4 motif（如 GAAA、CCCT、CGCC）内部含
+/// ≥3 连同种碱基，unit-1 同聚物正则在每个重复单元内独立命中，产出与外层 TR
+/// 完全嵌套的同聚物注释（详见 docs/known-issues.md 问题一）。
+///
+/// 正确性依据：
+/// 1. 同一外层 TR 内部所有完全嵌套的同聚物命中 copies 一致——精确周期结构的
+///    内部 run 长度由 motif 决定，与相位无关；
+/// 2. 周期 p、q 的两条精确 TR 互相嵌套需要长度 ≥ p+q-gcd(p,q) 的双周期窗口
+///    （Fine–Wilf 定理），这会强制公共周期使外层 motif 非最简，已被 primitive
+///    过滤排除。故"同一外层既有更强内层又有更弱内层"的裁决冲突在可达数据中
+///    不会出现；即便出现，逐对独立标记，结果仍是确定性的（"仅保留内层"生效，
+///    弱内层随被删外层一起消失）。
+///
+/// 命中区间作为 HashMap key 天然唯一，包含关系必为严格包含；完全嵌套判定
+/// 用几何包含（内层起点 ≥ 外层起点且内层终点 ≤ 外层终点），与
+/// `dedup_rotation_hits` 的旋转判定互不影响（本函数在其之后运行）。
+fn dedup_nested_hits<Pat>(region2motif: Region2Motif<Pat>) -> Region2Motif<Pat>
+where
+    Pat: From<String> + Clone + Borrow<String> + Debug,
+{
+    let hits: Vec<_> = region2motif
+        .value
+        .into_iter()
+        .map(|((start, end), pat)| {
+            let period = pattern_motif(pat.borrow()).len();
+            let copies = (end - start) / period;
+            (start, end, copies, pat)
+        })
+        .collect();
+
+    let n = hits.len();
+    let mut dropped = vec![false; n];
+    for i in 0..n {
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            // j 包含 i（区间唯一 ⇒ 必为严格包含）
+            let j_contains_i = hits[j].0 <= hits[i].0 && hits[i].1 <= hits[j].1;
+            if !j_contains_i {
+                continue;
+            }
+            if hits[i].2 <= hits[j].2 {
+                // 内层 copies ≤ 外层：保留外层，删内层
+                dropped[i] = true;
+            } else {
+                // 内层 copies > 外层：仅保留内层，删外层
+                dropped[j] = true;
+            }
+        }
+    }
+
+    let mut result = Region2Motif::default();
+    for (i, (start, end, _, pat)) in hits.into_iter().enumerate() {
+        if !dropped[i] {
+            result.insert((start, end), pat);
+        }
+    }
     result
 }
 
@@ -314,8 +392,9 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use crate::{
-        Region2Motif, UnitAndRepeats, all_seq_hp_tr_finder, dedup_rotation_hits, expand_regions,
-        generate_motifs, is_primitive_motif, merge_region, simplify_motif,
+        Region2Motif, UnitAndRepeats, all_seq_hp_tr_finder, dedup_nested_hits,
+        dedup_rotation_hits, expand_regions, generate_motifs, is_primitive_motif, merge_region,
+        simplify_motif,
     };
 
     #[test]
@@ -409,7 +488,7 @@ mod tests {
         seqs.insert("seq1".to_string(), "ACGTACGTAAACGT".to_string());
         seqs.insert("seq2".to_string(), "ACACACCCGCGCG".to_string());
         let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
-            all_seq_hp_tr_finder(&all_regs, &seqs);
+            all_seq_hp_tr_finder(&all_regs, &seqs, false);
         println!("{res:?}");
 
         res.iter().for_each(|(_key, value)| {
@@ -435,7 +514,7 @@ mod tests {
         let mut seqs = HashMap::new();
         seqs.insert("pure_at".to_string(), "AT".repeat(23));
         let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
-            all_seq_hp_tr_finder(&all_regs, &seqs);
+            all_seq_hp_tr_finder(&all_regs, &seqs, false);
         let mut kept: Vec<_> = res["pure_at"]
             .value
             .iter()
@@ -450,7 +529,7 @@ mod tests {
         let mut seqs = HashMap::new();
         seqs.insert("alt".to_string(), "TATATATATATAT".to_string());
         let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
-            all_seq_hp_tr_finder(&all_regs, &seqs);
+            all_seq_hp_tr_finder(&all_regs, &seqs, false);
         let mut kept: Vec<_> = res["alt"]
             .value
             .iter()
@@ -621,6 +700,125 @@ mod tests {
         );
     }
 
+    /// Feeds `dedup_nested_hits` a set of hand-built annotations and returns
+    /// what survived, sorted by start, mirroring `dedup_keep` for rotation
+    /// dedup. Patterns are `(motif)N`; copies are derived as (end-start)/period,
+    /// as the real finder emits them.
+    fn nested_keep(entries: &[((usize, usize), &str)]) -> Vec<(usize, usize, String)> {
+        let mut input: Region2Motif<Arc<String>> = Region2Motif::default();
+        for ((start, end), pattern) in entries {
+            input.insert((*start, *end), Arc::new(pattern.to_string()));
+        }
+
+        let mut kept: Vec<_> = dedup_nested_hits(input)
+            .value
+            .into_iter()
+            .map(|((start, end), pattern)| (start, end, pattern.to_string()))
+            .collect();
+        kept.sort();
+        kept
+    }
+
+    #[test]
+    fn test_nested_hp_inside_outer_dropped() {
+        // (GAAA)3 内部每个单元的 AAA 产出一条 (A)3，copies 3 ≤ 外层 3：删内层留外层
+        let kept = nested_keep(&[
+            ((0, 12), "(GAAA)3"),
+            ((1, 4), "(A)3"),
+            ((5, 8), "(A)3"),
+            ((9, 12), "(A)3"),
+        ]);
+        assert_eq!(kept, vec![(0, 12, "(GAAA)3".to_string())]);
+    }
+
+    #[test]
+    fn test_nested_copies_compare_across_periods() {
+        // copies 按 (end-start)/period 计算：外层 (GAAA)13 = 13，内层 (A)3 = 3
+        let kept = nested_keep(&[
+            ((0, 52), "(GAAA)13"),
+            ((1, 4), "(A)3"),
+            ((49, 52), "(A)3"),
+        ]);
+        assert_eq!(kept, vec![(0, 52, "(GAAA)13".to_string())]);
+    }
+
+    #[test]
+    fn test_nested_equal_copies_keeps_outer() {
+        // copies 相等（如 (CCCT)3 内的 (C)3）：保留外层
+        let kept = nested_keep(&[
+            ((0, 12), "(CCCT)3"),
+            ((4, 7), "(C)3"),
+            ((8, 11), "(C)3"),
+        ]);
+        assert_eq!(kept, vec![(0, 12, "(CCCT)3".to_string())]);
+    }
+
+    #[test]
+    fn test_nested_inner_more_copies_drops_outer() {
+        // (TGGGG)3 每单元含 GGGG：内层 (G)4 copies 4 > 外层 3 → 删外层，仅留内层
+        let kept = nested_keep(&[
+            ((0, 15), "(TGGGG)3"),
+            ((1, 5), "(G)4"),
+            ((6, 10), "(G)4"),
+            ((11, 15), "(G)4"),
+        ]);
+        assert_eq!(
+            kept,
+            vec![
+                (1, 5, "(G)4".to_string()),
+                (6, 10, "(G)4".to_string()),
+                (11, 15, "(G)4".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_nested_partial_overlap_untouched() {
+        // STR-109-2 真实形态：首单元 CCC 与前导 CC 连成 (C)5，与 (CCCT)3 部分重叠
+        // （非包含），必须原样保留；完全嵌套的 (C)3 被删除——问题二的边界重叠
+        // 不受嵌套去重影响的回归证明
+        let kept = nested_keep(&[
+            ((257, 262), "(C)5"),
+            ((259, 271), "(CCCT)3"),
+            ((263, 266), "(C)3"),
+            ((267, 270), "(C)3"),
+        ]);
+        assert_eq!(
+            kept,
+            vec![
+                (257, 262, "(C)5".to_string()),
+                (259, 271, "(CCCT)3".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_pipeline_nested_flag() {
+        let all_regs = vec![
+            UnitAndRepeats::new(1, 3).build_finder_regrex(),
+            UnitAndRepeats::new(4, 3).build_finder_regrex(),
+        ];
+
+        // GAAAGAAAGAAAGAAA：unit-4 旋转去重后剩 (GAAA)4 [0,16)，
+        // 外加 4 条嵌套的 (A)3。flag=false 保留全部 5 条，flag=true 只留外层。
+        let mut seqs = HashMap::new();
+        seqs.insert("gaaa".to_string(), "GAAAGAAAGAAAGAAA".to_string());
+
+        let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
+            all_seq_hp_tr_finder(&all_regs, &seqs, false);
+        assert_eq!(res["gaaa"].value.len(), 5);
+
+        let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
+            all_seq_hp_tr_finder(&all_regs, &seqs, true);
+        let mut kept: Vec<_> = res["gaaa"]
+            .value
+            .iter()
+            .map(|((start, end), pat)| (*start, *end, pat.to_string()))
+            .collect();
+        kept.sort();
+        assert_eq!(kept, vec![(0, 16, "(GAAA)4".to_string())]);
+    }
+
     #[test]
     fn test_expand_and_merge_regions() {
         // 扩区保持输入顺序，不排序
@@ -651,7 +849,7 @@ mod tests {
             format!("{}{}{}", "A".repeat(6), "C".repeat(10), "T".repeat(5)),
         );
         let res: HashMap<String, crate::Region2Motif<Arc<String>>> =
-            all_seq_hp_tr_finder(&all_regs, &seqs);
+            all_seq_hp_tr_finder(&all_regs, &seqs, false);
 
         let mut kept: Vec<_> = res["abutting_runs"]
             .value

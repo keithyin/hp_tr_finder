@@ -3,6 +3,22 @@
 本项目从 `0.5.0` 起记录变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.0] - 2026-11-21
+
+### Added
+
+- 新增嵌套注释去重，默认关闭，由 flag 启用：CLI 增加 `--dedupNested`，
+  lib 侧 `all_seq_hp_tr_finder` / `single_seq_hp_tr_finder` 增加尾参 `dedup_nested: bool`。
+- 嵌套去重规则（`dedup_nested_hits`，在旋转去重之后运行）：外层命中完全包含内层命中时
+  按拷贝数 `copies = (end - start) / motif 长度` 裁决——内层 copies > 外层 → 仅保留内层；
+  内层 copies ≤ 外层 → 保留外层。详见 `docs/known-issues.md` 修复说明。
+- 嵌套去重的单元测试与 CLI flag 端到端测试。
+
+### Changed
+
+- `all_seq_hp_tr_finder` / `single_seq_hp_tr_finder` 签名增加 `dedup_nested: bool` 参数
+  （破坏性变更）。
+
 ## [0.5.0] - 2026-11-20
 
 ### Added

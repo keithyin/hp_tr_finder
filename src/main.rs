@@ -41,12 +41,12 @@ struct Cli {
     #[arg(help = "input fasta file")]
     inp: String,
 
-    /// unit and min repeats. 1-2,2-2,3-2,4-2
-    #[arg(long = "unitAndRepeats", help = "unit and min repeats. 1-2,2-2,3-2,4-2", group = "spec")]
+    /// unit and min repeats. 1-3,2-3,3-3,4-3
+    #[arg(long = "unitAndRepeats", help = "unit and min repeats. 1-3,2-3,3-3,4-3", group = "spec")]
     unit_and_min_repeats: Option<String>,
 
-    /// motif and min repeats. A-2,AT-2
-    #[arg(long = "motifAndRepeats", help = "motif and min repeats. A-2,AT-2", group = "spec")]
+    /// motif and min repeats. A-3,AT-3
+    #[arg(long = "motifAndRepeats", help = "motif and min repeats. A-3,AT-3", group = "spec")]
     motif_and_min_repeats: Option<String>,
 
     /// output filepath; if not given, ${inp}.gff will be generated
@@ -69,6 +69,11 @@ struct Cli {
     /// extMax and extRatio are used together. Only effective in 'called' scenario
     #[arg(long = "extMax", help = "extMax and extRatio are used together. Only effective in 'called' scenario")]
     extend_max: Option<usize>,
+
+    /// dedup annotations fully nested inside an outer hit by copy number:
+    /// keep the outer when inner copies <= outer copies, else keep only the inner
+    #[arg(long = "dedupNested", help = "dedup annotations fully nested inside an outer hit by copy number: keep the outer when inner copies <= outer copies, else keep only the inner")]
+    dedup_nested: bool,
 }
 
 impl Cli {
@@ -209,7 +214,8 @@ fn tr_finder(cli: &Cli) -> Result<(), Box<dyn Error>> {
     let seqs: HashMap<String, String> = records.iter().cloned().collect();
     let regs = build_finder_regs(cli).map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    let res: HashMap<String, Region2Motif<Arc<String>>> = all_seq_hp_tr_finder(&regs, &seqs);
+    let res: HashMap<String, Region2Motif<Arc<String>>> =
+        all_seq_hp_tr_finder(&regs, &seqs, cli.dedup_nested);
 
     let cmd_line = std::env::args().collect::<Vec<_>>().join(" ");
     let mut writer = BufWriter::new(File::create(cli.get_oup_filepath())?);
@@ -544,6 +550,31 @@ mod tests {
         ]);
         assert_eq!(lines.len(), 1, "unexpected output: {lines:?}");
         assert!(lines[0].ends_with("Note=(GT)6,GTGTGTGTGTGT"), "{}", lines[0]);
+    }
+
+    #[test]
+    fn dedup_nested_flag_defaults_false_and_parses() {
+        let cli = cli_from(&["ref", "t.fa", "--unitAndRepeats", "1-3"]);
+        assert!(!cli.dedup_nested);
+
+        let cli = cli_from(&["ref", "t.fa", "--unitAndRepeats", "1-3", "--dedupNested"]);
+        assert!(cli.dedup_nested);
+    }
+
+    #[test]
+    fn ref_scenario_dedup_nested_flag_removes_nested_hp() {
+        // (GAAA)4 内部每个单元的 AAA 产出一条 (A)3；默认保留嵌套，开 flag 后只留外层
+        let seq = "GAAAGAAAGAAAGAAA";
+        let lines = run_on_seq("ref_nested_off", seq, "ref", &["--unitAndRepeats", "1-3,4-3"]);
+        assert_eq!(lines.len(), 5, "unexpected output: {lines:?}");
+
+        let lines = run_on_seq("ref_nested_on", seq, "ref", &[
+            "--unitAndRepeats",
+            "1-3,4-3",
+            "--dedupNested",
+        ]);
+        assert_eq!(lines.len(), 1, "unexpected output: {lines:?}");
+        assert!(lines[0].ends_with("Note=(GAAA)4,GAAAGAAAGAAAGAAA"), "{}", lines[0]);
     }
 
     #[test]
