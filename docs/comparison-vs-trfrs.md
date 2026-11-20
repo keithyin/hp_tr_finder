@@ -1,0 +1,208 @@
+# hp_tr_finder vs trfrs —— str-seqs 数据集检测对比报告
+
+- 日期：2026-11-21
+- 对比对象：`hp_tr_finder` 0.6.0（/home/keith/projects/hp_tr_finder）vs `trfrs` 5.3.0（/home/keith/projects/trfrs）
+- 数据集：`/home/keith/Datasets/str-seqs/str-seqs.fa`（70 条序列，50,470 bp，单序列 228–1053 bp，中位 722 bp；碱基组成 A 27.1% / T 27.0% / G 23.6% / C 22.3%，含 1 个 N）
+- 产物与分析脚本：`/tmp/hp_vs_trfrs/`（各配置输出、`analysis.json`、`scripts/*.py`）
+
+---
+
+## 0. 结论速览（TL;DR)
+
+| 维度 | hp_tr_finder | trfrs |
+|---|---|---|
+| 算法本质 | 正则精确匹配（perfect repeat），unit 1–4 × ≥3 拷贝 | TRF 统计 wraparound DP 比对，容忍 mismatch/indel，period 1–2000 |
+| 输出粒度 | 等位基因级：每段干净 tract 一条注释 | 位点级：每个统计显著区域一条记录（consensus + 打分） |
+| 本数据集检出 | 3770 条注释（84% 为 ≤4bp 同聚物） | 默认参数 196 条 / STR 敏感模式 378 条 |
+| 覆盖 bp（并集） | 17,762 bp（35.2%，其中 ≥6bp 命中仅 7,936） | 默认 9,003 bp；`--str --minscore 20` 11,927 bp |
+| 与对方交集 | — | 与 hp 的 bp 交集 6,7–9,0 kbp（Jaccard 0.33–0.42） |
+| 语义孪生对比 | — | `--ssr`（period 1–4）539 tract 中 97% 与 hp 注释 span 完全相同 |
+| 独有能力 | 精确分段/坐标扩展合并（called）/ 库 API | 不完美重复、长周期、打分字段、.dat/.csv/.ngs/.html |
+| 短板 | unit>4 / 拷贝<3 / 不完美序列全盲；输出碎片化冗余 | 孤立短 tract（<5–8bp）统计下限漏检；短 STR 需调低 minscore |
+| 耗时（50 kb） | 0.015 s | 0.24 s（≈16×，均无实际瓶颈） |
+
+两者不是竞争关系而是互补关系：hp 给出"该位点由哪些干净重复段构成"，trfrs 给出"哪里存在统计显著的重复区域（哪怕不完美）"。`--ssr` 模式下两者结果高度一致（97% span 一致、92% motif 等价）。
+
+---
+
+## 1. 对比设置
+
+### 1.1 工具与配置矩阵
+
+| # | 工具 | 配置 | 语义定位 |
+|---|---|---|---|
+| H1 | hp_tr_finder | `ref --unitAndRepeats 1-3,2-3,3-3,4-3` | 基准配置（与数据集自带 str-seqs.gff 一致） |
+| H2 | hp_tr_finder | H1 + `--dedupNested` | 0.6.0 新增嵌套去重 |
+| H3 | hp_tr_finder | `called`（同参数） | 区域合并视角 |
+| T1 | trfrs | 默认（2,5,7,80,10,50；period 1–2000） | TRF 经典人类参数 |
+| T2 | trfrs | `--str`（period 1–15，minscore 50） | TRF 默认阈值下的 STR |
+| T3 | trfrs | `--str --minscore 20` | 短 STR 敏感模式 |
+| T4 | trfrs | `--str --minscore 6`（与 minscore 8 输出完全相同） | 灵敏度地板 |
+| T5 | trfrs | `--ssr --minscore 20` | 干净 tract 视图（period 1–15） |
+| T6 | trfrs | `--ssr --minscore 6` | 同上，更低阈值 |
+| T7 | trfrs | `--ssr --minperiod 1 --maxperiod 4 --minscore 6` | **hp 的"语义孪生"**（unit 1–4 × ≥3 拷贝） |
+
+### 1.2 方法与校验
+
+- 坐标归一化到 0-based 半开区间后比对。hp 的 GFF 坐标为"start 1-based + end 0-based"混合约定，已用全部 3770 条注释的 Note 序列对 FASTA 逐一验证（3770/3770 吻合）；trfrs `--csv` 为 1-based 闭区间。
+- 复现性：H1 重新运行与数据集自带 `str-seqs.gff` 逐字节一致（仅命令行注释行不同），确认 0.6.0 未改变默认行为。
+- 交叉匹配规则：两条记录重叠 ≥ 短者长度的 50% 记为"对应"；另按 hp 注释长度分层（≤5bp / 6–9bp / ≥10bp）单独统计，消除"3bp 小注释蹭进大区域"造成的虚配。
+
+---
+
+## 2. 总量一览
+
+| 配置 | 记录数 | 并集覆盖 bp | 占全序列 | 命中序列 | 中位长度 | 耗时 |
+|---|--:|--:|--:|--:|--:|--:|
+| H1 hp ref | 3770 | 17,762 | 35.2% | 70/70 | 3 bp | 0.015 s |
+| H2 hp ref+dedupNested | 3710 | 17,762 | 35.2% | 70/70 | 3 bp | 0.015 s |
+| H3 hp called | 3074 | 17,762 | 35.2% | 70/70 | — | 0.015 s |
+| T1 trfrs 默认 | 196 | 9,003 | 17.8% | 65/70 | 109 bp | 0.24 s |
+| T2 str ms50 | 137 | 8,499 | 16.8% | 65/70 | 107 bp | 0.25 s |
+| T3 str ms20 | 378 | 11,927 | 23.6% | 70/70 | 25 bp | 0.25 s |
+| T4 str ms6 | 523 | 12,920 | 25.6% | 70/70 | 18 bp | 0.25 s |
+| T5 ssr ms20 | 480 | 6,314 | 12.5% | 70/70 | 10 bp | 0.25 s |
+| T6 ssr ms6 | 600 | 7,129 | 14.1% | 70/70 | 9 bp | 0.25 s |
+| T7 ssr p1–4 ms6 | 539 | 6,490 | 12.9% | 69/70 | 9 bp | 0.25 s |
+
+结构性观察：
+
+- **hp 的输出量与覆盖由超短注释主导**：unit-1（同聚物）注释占 3143/3770（83%），长度 3bp 的注释 2165 条（57%），≤5bp 注释占 80%。仅统计 ≥6bp 命中时 hp 并集覆盖从 17,762 bp 缩水到 7,936 bp（15.7%）——与 trfrs STR 模式的量级相当。
+- **trfrs 默认参数漏掉 5 条序列**（STR-115-1/-2/-3、260827STR-91-1/-93-1）：它们的重复都偏短（最长 tract 12–21bp），过不了 minscore 50；`--str --minscore 20` 后 70/70 全检出。
+- `--dedupNested` 恰删 60 条嵌套注释（3770→3710），与 `docs/known-issues.md` 记录完全一致；called 场景加 flag 输出逐字节不变（仅删内层、合并结果不变，已验证）。
+
+---
+
+## 3. 算法与语义差异（一切数字差异的根源）
+
+| | hp_tr_finder | trfrs |
+|---|---|---|
+| 检测原理 | 为每个 unit×min_repeats 组合生成正则（如 `(GA){3,}`），独立贪婪匹配 | 检测阶段用统计准则（匹配/indel 概率表）扫描候选，wraparound DP 精比对打分 |
+| 不完美重复 | 不支持——正则要求连续完整拷贝，中断即截断 | 支持——mismatch/indel 计入罚分，整段区域统一打 consensus |
+| 周期范围 | 由 `unitAndRepeats`/`motifAndRepeats` 显式枚举（本配置 1–4） | 1–2000（默认）/ 1–15（`--str`）；**maxperiod 还会限制候选扫描阶段**（见 §5 案例 6） |
+| 最小报告语义 | 固定"≥3 完整拷贝"（unit-1 即 ≥3bp） | 统计下限：与 minscore 及上下文相关，实测孤立 (A)3–5、(AT)2–3、(GA)2 均不可见，(A)6、(AT)4、(CAG)3 可见 |
+| 同一 locus 的输出形态 | 可输出多条：每个干净亚 tract 一条 | 一条大区域（不同周期解释可能并存多条，见 §6） |
+| 跨周期嵌套 | 设计上保留（0.6.0 `--dedupNested` 可选删除派生同聚物） | 保守的冗余剔除：仅"周期整倍数 + 分数 ≤1.1× + 重叠 ≥90%"或"同周期分数不更高"才删 |
+| 相位 | 每条注释给出精确 motif 与相位 | 区域 consensus（可能取不同旋转/相位），`--ssr` 有相位重锚 |
+
+---
+
+## 4. 区间级交叉对比（基准：H2 hp ref+dedupNested，3710 条）
+
+### 4.1 覆盖 bp 交集 / Jaccard
+
+| vs | 交集 bp | Jaccard |
+|---|--:|--:|
+| T1 默认 | 6,737 | 0.336 |
+| T3 str ms20 | 8,286 | 0.387 |
+| T4 str ms6 | 9,044 | 0.418 |
+| T5 ssr ms20 | 6,382 | 0.361 |
+| T6 ssr ms6 | 7,237 | 0.410 |
+| T7 ssr p1–4 | 6,712 | 0.383 |
+
+即使最敏感的 trfrs 配置也只覆盖 hp 碱基的一半左右——缺口几乎全是 hp 的 3–5bp 同聚物注释（trfrs 统计下限天然丢弃）。
+
+### 4.2 交叉匹配（重叠 ≥ 短者 50%）
+
+| vs | hp 命中 | hp 独有 | └ ≤5bp | └ 6–9bp | └ ≥10bp | trfrs 独有 | 最大 fan-in |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| T1 默认 | 754 | 2956 | 2676 | 234 | **46** | **86** | 33 |
+| T3 str ms20 | 1024 | 2686 | 2500 | 184 | **2** | 110 | 27 |
+| T4 str ms6 | 1142 | 2568 | 2465 | 101 | **2** | 156 | 27 |
+| T7 ssr p1–4 | 581 | 3129 | 2913 | 184 | 32 | **2** | 2 |
+
+关键读数：
+
+1. **hp ≥6bp 的"实质"命中 728 条中，trfrs 默认漏 280 条（262 条零重叠）**——它们是 period 1–4、≥3 拷贝、孤立于更大重复区域的短 tract，低于 TRF 统计触发条件；`--str --minscore 6` 仍漏 103 条（94 条零重叠）。反之 hp 独有的 ≥10bp 命中在 T3/T4 下只剩 0–2 条：**只要重复足够长，两个工具的位点检出高度一致**。
+2. **trfrs 独有记录（默认 86 条）全部是不完美重复**：86 条的 percent_matches 分布为 78 条 70–99%、8 条 <70%、0 条 100%——即 TRF 的增量价值恰在 hp 正则的盲区（错配/indel 打断的重复）。周期分布 2–59。
+3. **fan-in（一个 trfrs 区域最多套住多少条 hp 注释）最大 33**：hp 把一个不完美大 TR 拆成几十条干净亚段，trfrs 只报一条带 consensus 的区域记录。hp 注释有 20%（默认）/26%（str20）/29%（str6）完整落在某个 trfrs 区域内部。
+4. **trfrs str20 有 30 条记录与 hp 零重叠**，构成 hp 的配置性盲区：22 条 period>4（如 `(ACTTATG)2`、`(GCCAG)2.4`）、6 条拷贝数 <3（如 `(CAGC)2.8`）、2 条不完美。
+
+### 4.3 语义孪生对比（T7 ssr period1–4 vs H2）
+
+`--ssr` 输出"干净 tract"（≥3 完整拷贝、100% 匹配），与 hp 的 perfect-repeat 语义同构：
+
+- T7 共 539 条 tract，**525 条（97%）与某条 hp 注释 span 完全相同**；仅有的 2 条"独有" tract（STR-109-2 的 `(C)3`×2）恰是 hp 0.6.0 `--dedupNested` 有意删除的嵌套同聚物——对照未去重的 H1 则为 527/539（97.6%）。
+- 对应记录的 **motif 等价率 92%**（537/581，允许旋转/折叠等价）。
+- motif 等价且需要比较边界的 581 对中，525 对 span 逐碱基相同；12 对 hp 左边界前移 2–3bp（TRF 的相位重锚会丢弃 tract 尾部/头部的残缺拷贝，hp 的正则允许"借碱基"凑满 3 拷贝，如 `(AGG)4` vs `(AGG)3`，§5 案例 5）。
+- T7 漏掉 32 条 hp ≥10bp tract，全部是化合物位点上"亚 tract motif ≠ 区域 consensus motif"的情形（§5 案例 6）。
+
+---
+
+## 5. 典型案例（均经序列逐碱基核对）
+
+**案例 1｜化合物微卫星的两种视角——STR27-1**
+序列头部 `CACACATATATATATACACACACACACATATATACACACACACACACATATAT…`（连续化合物微卫星）。
+- hp：9 条精确分段 `(CA)3 [0,6)｜(AT)5 [5,15)｜(AC)6 [15,27)｜(AT)3 [27,33)｜(AC)7 [33,47)｜(AT)6 [47,59)｜(AC)11 [65,87)…`（相邻段边界共享 1bp，属 known-issues 问题二）。
+- trfrs 默认：一条 `[15,104) p=2 AC copies=44.5 pm=88%`；str 模式下两条 `[5,16) AT pm=100` + `[15,104) AC pm=88`。
+- 读法：hp 给出等位基因级精细结构（可直接设计引物/命名等位），trfrs 给出位点边界与整体纯度（88% 匹配）。两者对同一位点回答的是不同问题。
+
+**案例 2｜trfrs 独有：不完美重复——STR-114-1 [744,785)**
+`CGCCGAGAACCGCCAGCGAGCTGTGCCGAGAGCCGCGCCGA`，p=12，pm=63%，score=40。hp 的正则在此区间内找不到任何 ≥3 拷贝的完整单元 → 完全不可见。此类默认参数独有记录 86 条，是 trfrs 的核心增量。
+
+**案例 3｜trfrs 独有：完美但"不够格"的重复——260623STR1-1 [209,223)**
+`ACTTATGACTTATG` = `(ACTTATG)2`，pm=100%。hp 盲区原因：unit 长度 7 超出 1–4、拷贝数 2 低于最小 3。str20 零重叠的 30 条记录按此分类：22 条 period>4、6 条 copies<3、2 条不完美。
+
+**案例 4｜hp 独有：低于 TRF 统计下限的短 tract**
+`STR-105-2 [427,434) CCCCCCC`（(C)7，score 14 ≥ minscore 6）在 trfrs `--str --minscore 6` 下仍无任何重叠记录。合成探针实验定位了下限行为：
+- 孤立短 tract 不可见：`(A)3/4/5`、`(AT)2`、`(AT)3`（6bp!）、`(GA)2` 在 GC 富集侧翼中均未检出（minscore=6）；
+- 可见下限约 (A)6、(AT)4、(CAG)2.7+、(C)8、(G)7；
+- 但数据集中确有 `(C)5`、`(A)5`、`(T)5`、`(CG)3`、`(GT)3`（score 10–12）被检出——它们都位于重复富集、indel 型凌乱的上下文中（period-1 统计窗口被"AAAA-CAA-AAATT-…"这类区域触发）。
+- 结论：**TRF 的最小报告不是固定的"3 拷贝"规则，而是统计准则 + minscore + 上下文组成共同决定**；hp 则是与上下文无关的确定性"≥3 完整拷贝"。要完整同聚物清单，只能用 hp。
+
+**案例 5｜相位/边界歧义——260805STR18-1 [239,251)**
+序列 `…GAAGAAGAAGGAGGAGGAGGAGAGGAAG…`：hp 报 `(AGG)4 [239,251)`（借用 (AAG) 重复末位的碱基凑出第 4 拷贝），trfrs 报 `(AGG)3 [242,251)`。两解均合法（与 known-issues 问题二同源）；ssr 模式的相位重锚使 hp 左边界平均前移 2–3bp（12/581 对）。
+
+**案例 6｜maxperiod 不是纯输出过滤器——260827STR-88-9**
+一个 444bp 的 AG 富集化合物大位点 [101,545)：trfrs 默认以 p=8/10/12/14/54 五种周期解释并行报告；`--ssr`（period 1–15）提取出 25 条 GA/AG 干净 tract（全部与 hp 注释 span 相同）；但 `--ssr --maxperiod 4` 输出 **0 条**——period 1–4 的统计候选在该位点全部不触发，DP 根本不运行，连 period-2 tract 也拿不到。而 hp 靠独立正则在此报出 46 条 GA/AG/A/G 亚段。**结论：trfrs 限制周期区间会连带关闭"只有大周期候选才能触发"的区域，hp 不存在此耦合。**
+
+---
+
+## 6. 内部冗余对比
+
+| 输出 | 完全嵌套对 | 部分重叠对 | 备注 |
+|---|--:|--:|---|
+| H1 hp ref | 60 | 196 | 与 known-issues.md 记录一致 |
+| H2 ref+dedupNested | **0** | 193 | 3 对部分重叠随内层删除一并消失 |
+| T1 trfrs 默认 | 137 | 125 | `--no-redundancy` 前后记录数不变（196）：重叠记录全部不满足删除准则 |
+| T3 str ms20 | 98 | 149 | 无冗余剔除时 641 条 → 剔除 263 条（41%）后 378 |
+| T5/T6/T7 ssr | **0** | **0** | SSR 重叠消解设计上完全解决 |
+
+- trfrs 的冗余剔除准则（`src/clean.rs` `is_redundant`）：仅当"周期是对方整倍数且分数 ≤1.1×对方"或"同周期且分数不更高"，且重叠 ≥ 区间 90% 时删除。因此不同周期解释（p33⊃p2、p20 vs p21）与重叠不足 90% 的记录都保留——**两个工具默认输出都不是"无重叠"的，只是冗余形态不同**（hp：派生同聚物嵌套+边界借碱基；trfrs：多周期并行解释）。
+- hp 0.6.0 的 `--dedupNested` 与 trfrs `--ssr` 在 STR-109-2 上给出了相反的处理：前者删掉 `(CCCT)3` 内嵌的 `(C)3`×2，后者恰好把它们作为独立干净 tract 输出——语义取舍不同（派生冗余 vs 完整 tract 目录），使用时需明确需求。
+
+---
+
+## 7. 输出格式与坐标约定
+
+| | hp_tr_finder | trfrs |
+|---|---|---|
+| 输出形式 | 仅 GFF3（ref: `Note=(motif)copies,repseq`；called: 裸重复序列） | `.dat`（TRF 标准，含比对明细）、`--csv`（14 列，RFC 4180）、`--ngs`（stdout 流式，`@序列名` 分段）、`--html` 报告、`.mask` |
+| 坐标 | **start 1-based + end 0-based 混合**（tr-finder 风格，known-issues 有记；消费端极易踩坑） | start/end 均为 1-based 闭区间（TRF 标准） |
+| 每条记录字段 | motif、copies、序列 | period、copies、consensus size、score、pm/pi%、碱基组成%、熵、consensus、实际序列、侧翼 |
+| 输入 | FASTA（noodles-fasta；重复 ID 拼接合并） | FASTA + FASTQ + stdin 管道 |
+| 输出定位 | `-o` 指定文件 | `-o` 指定目录，多序列自动 `.sN` 编号 + summary |
+
+---
+
+## 8. 性能与工程
+
+| | hp_tr_finder | trfrs |
+|---|---|---|
+| 耗时（本数据集） | 0.015 s | 0.24 s（≈16×；50kb 级都无瓶颈） |
+| 内存模型 | 正则扫描，常数级 | DP 矩阵 ~604 B/碱基（本数据约 30 MB；`--str` 也不降扫描量，百万碱基级需数百 MB） |
+| 依赖 | regex + intervaltree + clap + noodles-fasta | clap + thiserror + libc（单二进制） |
+| 许可证 | MIT | AGPL-3.0-or-later（继承 TRF） |
+| 质量保障 | 单元 + CLI 端到端测试；known-issues.md 记录已知冗余 | 与 C 参考实现逐字节回归测试、库 API 测试、`scripts/ssr_check.py` 独立参考实现校验 |
+| 库 API | `all_seq_hp_tr_finder` / `single_seq_hp_tr_finder` | `TrfFinder::find`，`Send + Sync` 可复用 |
+
+---
+
+## 9. 结论与使用建议
+
+1. **定位不同**：hp_tr_finder 是"完美重复的精确编目器"（等位基因结构视图），trfrs 是"TRF 语义的区域发现器"（位点 + 统计视图）。在本数据集上：长重复（≥10bp tract）两者检出基本收敛（hp ≥10bp 独有仅 0–2 条）；分歧集中在两端——hp 独有的 3–9bp 孤立短 tract（trfrs 统计下限），和 trfrs 独有的不完美/长周期/低拷贝区域（hp 正则盲区）。
+2. **需要等位基因级干净结构**（每个亚段 motif + 拷贝数）→ hp `ref --dedupNested`；若同时想覆盖 period 1–15 并接受 TRF 相位取舍 → trfrs `--ssr`（两者 span 一致率 97%，可互为交叉验证，trfrs 自带 `scripts/ssr_check.py` 独立校验器）。
+3. **需要发现真实 STR 位点（含不完美）** → trfrs，短 STR 记得 `--str --minscore 20`（默认 50 会漏 5/70 条序列及大量 ≤25bp 位点）；追求极短敏感性用 `--minscore 8`（再低无增益）。
+4. **需要全部同聚物/二核苷酸 run 清单**（panel 候选枚举）→ 只有 hp 能给（≥3 拷贝固定语义）；但注意输出 80% 是 ≤5bp 注释，且问题二（196 对边界共享重叠）仍未修复，下游不应按注释条数直接计数。
+5. **周期区间参数语义不同**：hp 的 unit 枚举相互独立、互不影响；trfrs 的 `--maxperiod` 会限制候选触发（案例 6），收窄区间可能意外丢失 compound 位点内的小周期 tract。
+6. **整合使用的推荐姿势**：trfrs（str/ssr）定位点 → hp 提取位点内精确亚结构 → 以 trfrs 的 score/pm 字段评估位点纯度。两者坐标约定不同（1-based 闭 vs 混合），对接时务必先归一化。
