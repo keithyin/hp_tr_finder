@@ -1,8 +1,8 @@
 [package]
 name = "hp_tr_finder"
-version = "0.4.2"
+version = "0.5.0"
 edition = "2024"
-description = "minimap2 frontend"
+description = "Find homopolymers and tandem repeats in a FASTA file."
 license = "MIT"
 repository ="https://github.com/keithyin/hp_tr_finder"
 
@@ -11,3 +11,4 @@ repository ="https://github.com/keithyin/hp_tr_finder"
 regex = "1"
 intervaltree = "0.2.7"
 clap = { version = "4.6.6", features = ["derive"] }
+noodles-fasta = "0.68.0"
