@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/keithyin/hp_tr_finder/actions/workflows/ci.yml/badge.svg)](https://github.com/keithyin/hp_tr_finder/actions/workflows/ci.yml)
 [![Release](https://github.com/keithyin/hp_tr_finder/actions/workflows/release.yml/badge.svg)](https://github.com/keithyin/hp_tr_finder/actions/workflows/release.yml)
+[![Crates.io](https://img.shields.io/crates/v/hp_tr_finder.svg)](https://crates.io/crates/hp_tr_finder)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 homopolymer and tandem-repeats finder
