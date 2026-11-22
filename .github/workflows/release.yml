@@ -46,7 +46,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }} --features cli
 
       - name: Package
         run: |

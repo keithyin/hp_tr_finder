@@ -3,6 +3,16 @@
 本项目从 `0.5.0` 起记录变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.2] - 2026-11-22
+
+### Changed
+
+- `clap`、`noodles-fasta` 改为可选依赖，收进新增的 `cli` feature（不进 default）：
+  以 lib 方式依赖 `hp_tr_finder` 时默认只拉 `regex` 和 `intervaltree`，不再编译 CLI 依赖。
+- bin 目标加 `required-features = ["cli"]`：未启用 feature 时构建/测试只覆盖 lib，二进制名保持不变。
+- 安装二进制命令变为 `cargo install hp_tr_finder --features cli`；
+  CI（clippy/test 加 `--all-features`）、release 构建与 Makefile 已同步更新。
+
 ## [0.6.0] - 2026-11-21
 
 ### Added
