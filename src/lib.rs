@@ -8,7 +8,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-static BASES: [u8; 4] = ['A' as u8, 'C' as u8, 'G' as u8, 'T' as u8];
+static BASES: [u8; 4] = *b"ACGT";
 
 pub struct UnitAndRepeats {
     unit_size: u8,
@@ -91,6 +91,9 @@ pub fn simplify_motif(motif: &str) -> (String, usize) {
     (motif[..period].to_string(), n / period)
 }
 
+/// Maps a sequence position to the regions containing it: `pos -> [(region, motif), ...]`.
+pub type Pos2Regions<T> = HashMap<usize, Vec<((usize, usize), T)>>;
+
 #[derive(Debug)]
 pub struct Region2Motif<T> {
     // (usize, usize) -> (start, end)
@@ -109,7 +112,7 @@ where
         )
     }
 
-    pub fn flatten(&self) -> HashMap<usize, Vec<((usize, usize), T)>> {
+    pub fn flatten(&self) -> Pos2Regions<T> {
         let mut result = HashMap::new();
 
         self.value.iter().for_each(|(key, value)| {
@@ -152,7 +155,7 @@ where
 }
 
 pub fn all_seq_hp_tr_finder<RegK, SeqK, SeqV, MotifT>(
-    all_regs: &Vec<HashMap<RegK, Regex>>,
+    all_regs: &[HashMap<RegK, Regex>],
     seqs: &HashMap<SeqK, SeqV>,
     dedup_nested: bool,
 ) -> HashMap<SeqK, Region2Motif<MotifT>>
@@ -166,12 +169,8 @@ where
 
     seqs.iter()
         .map(|(seq_name, seq)| {
-            let region2motif = single_seq_hp_tr_finder(
-                all_regs,
-                &mut match_patterns,
-                seq.borrow(),
-                dedup_nested,
-            );
+            let region2motif =
+                single_seq_hp_tr_finder(all_regs, &mut match_patterns, seq.borrow(), dedup_nested);
 
             (seq_name.clone(), region2motif)
         })
@@ -179,7 +178,7 @@ where
 }
 
 pub fn single_seq_hp_tr_finder<RegK, MotifT>(
-    all_regs: &Vec<HashMap<RegK, Regex>>,
+    all_regs: &[HashMap<RegK, Regex>],
     match_patterns: &mut HashMap<String, MotifT>,
     seq: &str,
     dedup_nested: bool,
@@ -358,7 +357,7 @@ pub fn hp_tr_finder<RegK, Pat>(
     Pat: From<String> + Clone + Debug,
 {
     for (motif, reg) in regs {
-        for m in reg.find_iter(&seq) {
+        for m in reg.find_iter(seq) {
             let (s, e) = (m.start(), m.end());
             let match_pat = format!("({}){}", motif.borrow(), (e - s) / motif.borrow().len());
             if !match_patterns.contains_key(&match_pat) {
@@ -392,9 +391,8 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use crate::{
-        Region2Motif, UnitAndRepeats, all_seq_hp_tr_finder, dedup_nested_hits,
-        dedup_rotation_hits, expand_regions, generate_motifs, is_primitive_motif, merge_region,
-        simplify_motif,
+        Region2Motif, UnitAndRepeats, all_seq_hp_tr_finder, dedup_nested_hits, dedup_rotation_hits,
+        expand_regions, generate_motifs, is_primitive_motif, merge_region, simplify_motif,
     };
 
     #[test]
@@ -595,10 +593,7 @@ mod tests {
         let kept = dedup_keep(&[((0, 6), "(AT)3"), ((20, 26), "(GT)3")]);
         assert_eq!(
             kept,
-            vec![
-                (0, 6, "(AT)3".to_string()),
-                (20, 26, "(GT)3".to_string()),
-            ]
+            vec![(0, 6, "(AT)3".to_string()), (20, 26, "(GT)3".to_string()),]
         );
     }
 
@@ -609,10 +604,7 @@ mod tests {
         let kept = dedup_keep(&[((0, 6), "(AAT)2"), ((5, 11), "(TGG)2")]);
         assert_eq!(
             kept,
-            vec![
-                (0, 6, "(AAT)2".to_string()),
-                (5, 11, "(TGG)2".to_string()),
-            ]
+            vec![(0, 6, "(AAT)2".to_string()), (5, 11, "(TGG)2".to_string()),]
         );
     }
 
@@ -622,10 +614,7 @@ mod tests {
         let kept = dedup_keep(&[((0, 8), "(AT)4"), ((2, 8), "(ATG)2")]);
         assert_eq!(
             kept,
-            vec![
-                (0, 8, "(AT)4".to_string()),
-                (2, 8, "(ATG)2".to_string()),
-            ]
+            vec![(0, 8, "(AT)4".to_string()), (2, 8, "(ATG)2".to_string()),]
         );
     }
 
@@ -682,10 +671,7 @@ mod tests {
         let kept = dedup_keep(&[((0, 6), "(A)6"), ((6, 16), "(C)10")]);
         assert_eq!(
             kept,
-            vec![
-                (0, 6, "(A)6".to_string()),
-                (6, 16, "(C)10".to_string()),
-            ]
+            vec![(0, 6, "(A)6".to_string()), (6, 16, "(C)10".to_string()),]
         );
 
         // 一条首尾相接的同聚物链
@@ -734,22 +720,14 @@ mod tests {
     #[test]
     fn test_nested_copies_compare_across_periods() {
         // copies 按 (end-start)/period 计算：外层 (GAAA)13 = 13，内层 (A)3 = 3
-        let kept = nested_keep(&[
-            ((0, 52), "(GAAA)13"),
-            ((1, 4), "(A)3"),
-            ((49, 52), "(A)3"),
-        ]);
+        let kept = nested_keep(&[((0, 52), "(GAAA)13"), ((1, 4), "(A)3"), ((49, 52), "(A)3")]);
         assert_eq!(kept, vec![(0, 52, "(GAAA)13".to_string())]);
     }
 
     #[test]
     fn test_nested_equal_copies_keeps_outer() {
         // copies 相等（如 (CCCT)3 内的 (C)3）：保留外层
-        let kept = nested_keep(&[
-            ((0, 12), "(CCCT)3"),
-            ((4, 7), "(C)3"),
-            ((8, 11), "(C)3"),
-        ]);
+        let kept = nested_keep(&[((0, 12), "(CCCT)3"), ((4, 7), "(C)3"), ((8, 11), "(C)3")]);
         assert_eq!(kept, vec![(0, 12, "(CCCT)3".to_string())]);
     }
 

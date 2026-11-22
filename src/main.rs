@@ -1,7 +1,7 @@
 use clap::{Parser, ValueEnum};
 use hp_tr_finder::{
-    all_seq_hp_tr_finder, expand_regions, merge_region, simplify_motif, Region2Motif,
-    UnitAndRepeats,
+    Region2Motif, UnitAndRepeats, all_seq_hp_tr_finder, expand_regions, merge_region,
+    simplify_motif,
 };
 use noodles_fasta as fasta;
 use regex::Regex;
@@ -42,37 +42,66 @@ struct Cli {
     inp: String,
 
     /// unit and min repeats. 1-3,2-3,3-3,4-3
-    #[arg(long = "unitAndRepeats", help = "unit and min repeats. 1-3,2-3,3-3,4-3", group = "spec")]
+    #[arg(
+        long = "unitAndRepeats",
+        help = "unit and min repeats. 1-3,2-3,3-3,4-3",
+        group = "spec"
+    )]
     unit_and_min_repeats: Option<String>,
 
     /// motif and min repeats. A-3,AT-3
-    #[arg(long = "motifAndRepeats", help = "motif and min repeats. A-3,AT-3", group = "spec")]
+    #[arg(
+        long = "motifAndRepeats",
+        help = "motif and min repeats. A-3,AT-3",
+        group = "spec"
+    )]
     motif_and_min_repeats: Option<String>,
 
     /// output filepath; if not given, ${inp}.gff will be generated
-    #[arg(short = 'o', long = "oupPath", help = "output filepath; if not given, ${inp}.gff will be generated")]
+    #[arg(
+        short = 'o',
+        long = "oupPath",
+        help = "output filepath; if not given, ${inp}.gff will be generated"
+    )]
     oup_filepath: Option<String>,
 
     /// extending the tr-region. Only effective in 'called' scenario
-    #[arg(long = "extLeft", default_value_t = 0, help = "extending the tr-region. Only effective in 'called' scenario")]
+    #[arg(
+        long = "extLeft",
+        default_value_t = 0,
+        help = "extending the tr-region. Only effective in 'called' scenario"
+    )]
     extend_left: usize,
 
     /// extending the tr-region. Only effective in 'called' scenario
-    #[arg(long = "extRight", default_value_t = 0, help = "extending the tr-region. Only effective in 'called' scenario")]
+    #[arg(
+        long = "extRight",
+        default_value_t = 0,
+        help = "extending the tr-region. Only effective in 'called' scenario"
+    )]
     extend_right: usize,
 
     /// extend left/right according to origin_tr_region_len * extRatio; if
     /// provided, it will invalidate extLeft/extRight. Only effective in 'called' scenario
-    #[arg(long = "extRatio", help = "extend left right according to origin_tr_region_len * extRatio. if provided, it will invalidate extLeft/extRight. Only effective in 'called' scenario")]
+    #[arg(
+        long = "extRatio",
+        help = "extend left right according to origin_tr_region_len * extRatio. if provided, it will invalidate extLeft/extRight. Only effective in 'called' scenario"
+    )]
     extend_ratio: Option<f32>,
 
     /// extMax and extRatio are used together. Only effective in 'called' scenario
-    #[arg(long = "extMax", help = "extMax and extRatio are used together. Only effective in 'called' scenario")]
+    #[arg(
+        long = "extMax",
+        help = "extMax and extRatio are used together. Only effective in 'called' scenario"
+    )]
     extend_max: Option<usize>,
 
     /// dedup annotations fully nested inside an outer hit by copy number:
     /// keep the outer when inner copies <= outer copies, else keep only the inner
-    #[arg(long = "dedupNested", help = "dedup annotations fully nested inside an outer hit by copy number: keep the outer when inner copies <= outer copies, else keep only the inner")]
+    #[arg(
+        long = "dedupNested",
+        help = "dedup annotations fully nested inside an outer hit by copy number: keep the outer when inner copies <= outer copies, else keep only the inner"
+    )]
     dedup_nested: bool,
 }
 
@@ -82,7 +111,9 @@ impl Cli {
             Some(path) => path.clone(),
             None => format!(
                 "{}.gff",
-                self.inp.rsplit_once('.').map_or(self.inp.as_str(), |(s, _)| s)
+                self.inp
+                    .rsplit_once('.')
+                    .map_or(self.inp.as_str(), |(s, _)| s)
             ),
         }
     }
@@ -288,7 +319,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_finder_regs, Cli, Scenario};
+    use super::{Cli, Scenario, build_finder_regs};
     use clap::Parser;
 
     /// Construct a Cli from an argv slice (program name + args).
@@ -298,17 +329,21 @@ mod tests {
 
     #[test]
     fn unit_mode_builds_one_regex_map_per_unit() {
-        let cli = cli_from(&[
-            "ref", "t.fa", "--unitAndRepeats", "1-3,2-2",
-        ]);
+        let cli = cli_from(&["ref", "t.fa", "--unitAndRepeats", "1-3,2-2"]);
         let regs = build_finder_regs(&cli).unwrap();
         assert_eq!(regs.len(), 2);
 
         // unit 1: homopolymer motifs only, min repeats 3.
         let unit1 = &regs[0];
         assert_eq!(
-            unit1.keys().cloned().collect::<std::collections::BTreeSet<_>>(),
-            ["A", "C", "G", "T"].into_iter().map(str::to_string).collect()
+            unit1
+                .keys()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>(),
+            ["A", "C", "G", "T"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
         );
         let a3 = &unit1["A"];
         assert_eq!(a3.as_str(), "(A){3,}");
@@ -326,9 +361,7 @@ mod tests {
 
     #[test]
     fn motif_mode_builds_a_single_map_from_explicit_motifs() {
-        let cli = cli_from(&[
-            "ref", "t.fa", "--motifAndRepeats", "A-2,AT-2",
-        ]);
+        let cli = cli_from(&["ref", "t.fa", "--motifAndRepeats", "A-2,AT-2"]);
         let regs = build_finder_regs(&cli).unwrap();
         assert_eq!(regs.len(), 1);
 
@@ -415,7 +448,13 @@ mod tests {
     #[test]
     fn both_specs_conflict_at_clap_level() {
         let args = [
-            "hp_tr_finder", "ref", "t.fa", "--unitAndRepeats", "1-2", "--motifAndRepeats", "A-2",
+            "hp_tr_finder",
+            "ref",
+            "t.fa",
+            "--unitAndRepeats",
+            "1-2",
+            "--motifAndRepeats",
+            "A-2",
         ];
         let Err(err) = Cli::try_parse_from(args) else {
             panic!("expected a clap conflict error");
@@ -434,12 +473,18 @@ mod tests {
         // non-numeric min repeats
         let cli = cli_from(&["ref", "t.fa", "--unitAndRepeats", "1-x"]);
         let err = build_finder_regs(&cli).unwrap_err();
-        assert!(err.contains("invalid min repeats"), "unexpected error: {err}");
+        assert!(
+            err.contains("invalid min repeats"),
+            "unexpected error: {err}"
+        );
 
         // zero unit size
         let cli = cli_from(&["ref", "t.fa", "--unitAndRepeats", "0-2"]);
         let err = build_finder_regs(&cli).unwrap_err();
-        assert!(err.contains("unit size must be >= 1"), "unexpected error: {err}");
+        assert!(
+            err.contains("unit size must be >= 1"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -447,7 +492,10 @@ mod tests {
         // malformed item: no '-'
         let cli = cli_from(&["ref", "t.fa", "--motifAndRepeats", "A2"]);
         let err = build_finder_regs(&cli).unwrap_err();
-        assert!(err.contains("invalid motif-repeats spec"), "unexpected error: {err}");
+        assert!(
+            err.contains("invalid motif-repeats spec"),
+            "unexpected error: {err}"
+        );
 
         // motif that yields an invalid regex: '[' alone is an unclosed class.
         let cli = cli_from(&["ref", "t.fa", "--motifAndRepeats", "[-2"]);
@@ -460,16 +508,25 @@ mod tests {
         // `--motifAndRepeats=-2`：motif 为空（'-' 被当作分隔符），不得 panic
         let cli = cli_from(&["ref", "t.fa", "--motifAndRepeats=-2"]);
         let err = build_finder_regs(&cli).unwrap_err();
-        assert!(err.contains("motif must not be empty"), "unexpected error: {err}");
+        assert!(
+            err.contains("motif must not be empty"),
+            "unexpected error: {err}"
+        );
 
         // min repeats 为 0 会产生 {0,} 的零长度注释，两种模式都应拒绝
         let cli = cli_from(&["ref", "t.fa", "--unitAndRepeats", "1-0"]);
         let err = build_finder_regs(&cli).unwrap_err();
-        assert!(err.contains("min repeats must be >= 1"), "unexpected error: {err}");
+        assert!(
+            err.contains("min repeats must be >= 1"),
+            "unexpected error: {err}"
+        );
 
         let cli = cli_from(&["ref", "t.fa", "--motifAndRepeats", "AT-0"]);
         let err = build_finder_regs(&cli).unwrap_err();
-        assert!(err.contains("min repeats must be >= 1"), "unexpected error: {err}");
+        assert!(
+            err.contains("min repeats must be >= 1"),
+            "unexpected error: {err}"
+        );
     }
 
     /// 写一个临时 FASTA，跑完整 CLI 流程，返回去除 `#` 头后的 GFF 行。
@@ -505,12 +562,24 @@ mod tests {
             "called_ext",
             seq,
             "called",
-            &["--unitAndRepeats", "2-5,3-4,4-4", "--extLeft", "3", "--extRight", "3"],
+            &[
+                "--unitAndRepeats",
+                "2-5,3-4,4-4",
+                "--extLeft",
+                "3",
+                "--extRight",
+                "3",
+            ],
         );
         assert_eq!(lines.len(), 1, "unexpected output: {lines:?}");
         let cols: Vec<_> = lines[0].split('\t').collect();
         // 右端扩区 clamp 到序列末尾（本例 seq.len() == 54）
-        assert_eq!((cols[3], cols[4]), ("8", "54"), "unexpected line: {}", lines[0]);
+        assert_eq!(
+            (cols[3], cols[4]),
+            ("8", "54"),
+            "unexpected line: {}",
+            lines[0]
+        );
         assert_eq!(cols[8], &seq[7..54]);
 
         // extRatio 0.5 + extMax 4：18bp/20bp 区域各扩 9/10bp，被 extMax 封顶到 4
@@ -529,27 +598,44 @@ mod tests {
         );
         assert_eq!(lines.len(), 1, "unexpected output: {lines:?}");
         let cols: Vec<_> = lines[0].split('\t').collect();
-        assert_eq!((cols[3], cols[4]), ("7", "54"), "unexpected line: {}", lines[0]);
+        assert_eq!(
+            (cols[3], cols[4]),
+            ("7", "54"),
+            "unexpected line: {}",
+            lines[0]
+        );
         assert_eq!(cols[8], &seq[6..54]);
     }
 
     #[test]
     fn ref_scenario_dedups_rotations_and_keeps_simplified_motif() {
         // (ATG)6 的旋转 (TGA)/(GAT) 应被去除，只留一条
-        let lines = run_on_seq("ref_dedup", "ACGTACGTAAATGATGATGATGATGATG", "ref", &[
-            "--unitAndRepeats",
-            "2-5,3-4,4-4",
-        ]);
+        let lines = run_on_seq(
+            "ref_dedup",
+            "ACGTACGTAAATGATGATGATGATGATG",
+            "ref",
+            &["--unitAndRepeats", "2-5,3-4,4-4"],
+        );
         assert_eq!(lines.len(), 1, "unexpected output: {lines:?}");
-        assert!(lines[0].ends_with("Note=(ATG)6,ATGATGATGATGATGATG"), "{}", lines[0]);
+        assert!(
+            lines[0].ends_with("Note=(ATG)6,ATGATGATGATGATGATG"),
+            "{}",
+            lines[0]
+        );
 
         // 显式非最简 motif 化简后按最简形式报告
-        let lines = run_on_seq("ref_simplify", "NNNNNNNNNNGTGTGTGTGTGT", "ref", &[
-            "--motifAndRepeats",
-            "GTGT-3",
-        ]);
+        let lines = run_on_seq(
+            "ref_simplify",
+            "NNNNNNNNNNGTGTGTGTGTGT",
+            "ref",
+            &["--motifAndRepeats", "GTGT-3"],
+        );
         assert_eq!(lines.len(), 1, "unexpected output: {lines:?}");
-        assert!(lines[0].ends_with("Note=(GT)6,GTGTGTGTGTGT"), "{}", lines[0]);
+        assert!(
+            lines[0].ends_with("Note=(GT)6,GTGTGTGTGTGT"),
+            "{}",
+            lines[0]
+        );
     }
 
     #[test]
@@ -565,16 +651,26 @@ mod tests {
     fn ref_scenario_dedup_nested_flag_removes_nested_hp() {
         // (GAAA)4 内部每个单元的 AAA 产出一条 (A)3；默认保留嵌套，开 flag 后只留外层
         let seq = "GAAAGAAAGAAAGAAA";
-        let lines = run_on_seq("ref_nested_off", seq, "ref", &["--unitAndRepeats", "1-3,4-3"]);
+        let lines = run_on_seq(
+            "ref_nested_off",
+            seq,
+            "ref",
+            &["--unitAndRepeats", "1-3,4-3"],
+        );
         assert_eq!(lines.len(), 5, "unexpected output: {lines:?}");
 
-        let lines = run_on_seq("ref_nested_on", seq, "ref", &[
-            "--unitAndRepeats",
-            "1-3,4-3",
-            "--dedupNested",
-        ]);
+        let lines = run_on_seq(
+            "ref_nested_on",
+            seq,
+            "ref",
+            &["--unitAndRepeats", "1-3,4-3", "--dedupNested"],
+        );
         assert_eq!(lines.len(), 1, "unexpected output: {lines:?}");
-        assert!(lines[0].ends_with("Note=(GAAA)4,GAAAGAAAGAAAGAAA"), "{}", lines[0]);
+        assert!(
+            lines[0].ends_with("Note=(GAAA)4,GAAAGAAAGAAAGAAA"),
+            "{}",
+            lines[0]
+        );
     }
 
     #[test]
